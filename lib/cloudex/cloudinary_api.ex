@@ -20,7 +20,7 @@ defmodule Cloudex.CloudinaryApi do
   or {:error, "reason"}
   """
   @spec upload(String.t() | {:ok, String.t()}, map) ::
-          {:ok, Cloudex.UploadedImage.t()} | {:error, any}
+  {:ok, Cloudex.UploadedImage.t()} | {:error, any}
   def upload(item, opts \\ %{})
   def upload({:ok, item}, opts) when is_binary(item), do: upload(item, opts)
 
@@ -76,132 +76,134 @@ defmodule Cloudex.CloudinaryApi do
 
   @doc """
     Converts the json result from cloudinary to a %UploadedImage{} struct
-  """
-  @spec json_result_to_struct(map, String.t()) :: %Cloudex.UploadedImage{}
-  def json_result_to_struct(result, source) do
-    converted = Enum.map(result, fn {k, v} -> {String.to_atom(k), v} end) ++ [source: source]
-    struct(%Cloudex.UploadedImage{}, converted)
-  end
+    """
+    @spec json_result_to_struct(map, String.t()) :: %Cloudex.UploadedImage{}
+    def json_result_to_struct(result, source) do
+      converted = Enum.map(result, fn {k, v} -> {String.to_atom(k), v} end) ++ [source: source]
+      struct(%Cloudex.UploadedImage{}, converted)
+    end
 
-  @spec upload_file(String.t(), map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
-  defp upload_file(file_path, opts) do
-    options =
+    @spec upload_file(String.t(), map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
+    defp upload_file(file_path, opts) do
+      options =
+        opts
+        |> extract_cloudinary_opts
+        |> prepare_opts
+        |> sign
+        |> unify
+        |> Map.to_list()
+
+      body = {:multipart, [{:file, file_path} | options]}
+
+      post(body, file_path, opts)
+    end
+
+    @spec extract_cloudinary_opts(map) :: map
+    defp extract_cloudinary_opts(opts) do
+      Map.delete(opts, :resource_type)
+    end
+
+    @spec upload_url(String.t(), map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
+    defp upload_url(url, opts) do
       opts
-      |> extract_cloudinary_opts
+      |> Map.merge(%{file: url})
       |> prepare_opts
       |> sign
-      |> unify
-      |> Map.to_list()
+      |> URI.encode_query()
+      |> post(url, opts)
+    end
 
-    body = {:multipart, [{:file, file_path} | options]}
-
-    post(body, file_path, opts)
-  end
-
-  @spec extract_cloudinary_opts(map) :: map
-  defp extract_cloudinary_opts(opts) do
-    Map.delete(opts, :resource_type)
-  end
-
-  @spec upload_url(String.t(), map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
-  defp upload_url(url, opts) do
-    opts
-    |> Map.merge(%{file: url})
-    |> prepare_opts
-    |> sign
-    |> URI.encode_query()
-    |> post(url, opts)
-  end
-
-  defp credentials do
-    [
-      hackney: [
-        basic_auth: {Cloudex.Settings.get(:api_key), Cloudex.Settings.get(:secret)}
+    defp credentials do
+      [
+        hackney: [
+          basic_auth: {Cloudex.Settings.get(:api_key), Cloudex.Settings.get(:secret)},
+          timeout: 60_000,
+          recv_timeout: 60_000
+        ]
       ]
-    ]
-  end
+    end
 
-  @spec delete_file(bitstring, map) ::
-          {:ok, HTTPoison.Response.t() | HTTPoison.AsyncResponse.t()}
-          | {:error, HTTPoison.Error.t()}
-  defp delete_file(item, opts) do
-    HTTPoison.delete(delete_url_for(opts, item), @cloudinary_headers, credentials())
-  end
+    @spec delete_file(bitstring, map) ::
+    {:ok, HTTPoison.Response.t() | HTTPoison.AsyncResponse.t()}
+    | {:error, HTTPoison.Error.t()}
+    defp delete_file(item, opts) do
+      HTTPoison.delete(delete_url_for(opts, item), @cloudinary_headers, credentials())
+    end
 
-  defp delete_url_for(opts, item) do
-    "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/resources/#{
-      Map.get(opts, :resource_type, "image")
-    }/#{Map.get(opts, :type, "upload")}?public_ids[]=#{item}"
-  end
+    defp delete_url_for(opts, item) do
+      "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/resources/#{
+        Map.get(opts, :resource_type, "image")
+      }/#{Map.get(opts, :type, "upload")}?public_ids[]=#{item}"
+    end
 
-  @spec delete_file(bitstring, map) ::
-          {:ok, HTTPoison.Response.t() | HTTPoison.AsyncResponse.t()}
-          | {:error, HTTPoison.Error.t()}
-  defp delete_by_prefix(prefix, opts) do
-    HTTPoison.delete(delete_prefix_url_for(opts, prefix), @cloudinary_headers, credentials())
-  end
+    @spec delete_file(bitstring, map) ::
+    {:ok, HTTPoison.Response.t() | HTTPoison.AsyncResponse.t()}
+    | {:error, HTTPoison.Error.t()}
+    defp delete_by_prefix(prefix, opts) do
+      HTTPoison.delete(delete_prefix_url_for(opts, prefix), @cloudinary_headers, credentials())
+    end
 
-  defp delete_prefix_url_for(%{resource_type: resource_type}, prefix) do
-    delete_prefix_url(resource_type, prefix)
-  end
+    defp delete_prefix_url_for(%{resource_type: resource_type}, prefix) do
+      delete_prefix_url(resource_type, prefix)
+    end
 
-  defp delete_prefix_url_for(_, prefix), do: delete_prefix_url("image", prefix)
+    defp delete_prefix_url_for(_, prefix), do: delete_prefix_url("image", prefix)
 
-  defp delete_prefix_url(resource_type, prefix) do
-    "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/resources/#{resource_type}/upload?prefix=#{
-      prefix
-    }"
-  end
+    defp delete_prefix_url(resource_type, prefix) do
+      "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/resources/#{resource_type}/upload?prefix=#{
+        prefix
+      }"
+    end
 
-  @spec post(tuple | String.t(), binary, map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
-  defp post(body, source, opts) do
-    with {:ok, raw_response} <- common_post(body, opts),
-         {:ok, response} <- @json_library.decode(raw_response.body),
-         do: handle_response(response, source)
-  end
+    @spec post(tuple | String.t(), binary, map) :: {:ok, %Cloudex.UploadedImage{}} | {:error, any}
+    defp post(body, source, opts) do
+      with {:ok, raw_response} <- common_post(body, opts),
+           {:ok, response} <- @json_library.decode(raw_response.body),
+           do: handle_response(response, source)
+      end
 
-  defp common_post(body, opts) do
-    HTTPoison.request(:post, url_for(opts), body, @cloudinary_headers, credentials())
-  end
+      defp common_post(body, opts) do
+        HTTPoison.request(:post, url_for(opts), body, @cloudinary_headers, credentials())
+      end
 
-  defp context_to_list(context) do
-    context
-    |> Enum.reduce([], fn {k, v}, acc -> acc ++ ["#{k}=#{v}"] end)
-    |> Enum.join("|")
-  end
+      defp context_to_list(context) do
+        context
+        |> Enum.reduce([], fn {k, v}, acc -> acc ++ ["#{k}=#{v}"] end)
+                                                           |> Enum.join("|")
+      end
 
-  @spec prepare_opts(map | list) :: map
+      @spec prepare_opts(map | list) :: map
 
-  defp prepare_opts(%{tags: tags} = opts) when is_list(tags),
-    do: %{opts | tags: Enum.join(tags, ",")} |> prepare_opts()
+      defp prepare_opts(%{tags: tags} = opts) when is_list(tags),
+      do: %{opts | tags: Enum.join(tags, ",")} |> prepare_opts()
 
-  defp prepare_opts(%{context: context} = opts) when is_map(context),
-    do: %{opts | context: context_to_list(context)} |> prepare_opts()
+      defp prepare_opts(%{context: context} = opts) when is_map(context),
+      do: %{opts | context: context_to_list(context)} |> prepare_opts()
 
-  defp prepare_opts(opts), do: opts
+      defp prepare_opts(opts), do: opts
 
-  defp url_for(%{resource_type: resource_type}), do: url(resource_type)
-  defp url_for(_), do: url("image")
+      defp url_for(%{resource_type: resource_type}), do: url(resource_type)
+      defp url_for(_), do: url("image")
 
-  def url(resource_type) do
-    "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/#{resource_type}/upload"
-  end
+      def url(resource_type) do
+        "#{@base_url}#{Cloudex.Settings.get(:cloud_name)}/#{resource_type}/upload"
+      end
 
-  @spec handle_response(map, String.t()) :: {:error, any} | {:ok, %Cloudex.UploadedImage{}}
-  defp handle_response(
-         %{
-           "error" => %{
-             "message" => error
-           }
-         },
-         _source
-       ) do
-    {:error, error}
-  end
+      @spec handle_response(map, String.t()) :: {:error, any} | {:ok, %Cloudex.UploadedImage{}}
+      defp handle_response(
+        %{
+          "error" => %{
+            "message" => error
+          }
+        },
+        _source
+      ) do
+        {:error, error}
+      end
 
-  defp handle_response(response, source) do
-    {:ok, json_result_to_struct(response, source)}
-  end
+      defp handle_response(response, source) do
+        {:ok, json_result_to_struct(response, source)}
+      end
 
   #  Unifies hybrid map into string-only key map.
   #  ie. `%{a: 1, "b" => 2} => %{"a" => 1, "b" => 2}`
@@ -217,8 +219,8 @@ defmodule Cloudex.CloudinaryApi do
       |> Map.drop([:file, :resource_type])
       |> Map.merge(%{"timestamp" => timestamp})
       |> Enum.map(fn {key, val} -> "#{key}=#{val}" end)
-      |> Enum.sort()
-      |> Enum.join("&")
+                                           |> Enum.sort()
+                                           |> Enum.join("&")
 
     signature = sha(data_without_secret <> Cloudex.Settings.get(:secret))
 
